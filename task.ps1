@@ -11,6 +11,7 @@ $vmName = "matebox"
 $vmImage = "Ubuntu2204"
 $vmSize = "Standard_B2ats_v2"
 $dnsLabel = "matetask" + (Get-Random -Count 1)
+$dcrName = "mate-linux-dcr"
 
 $localKeyPath = "$HOME\.ssh\matebox_task13_key"
 if (-not (Test-Path "$localKeyPath.pub")) {
@@ -54,17 +55,62 @@ $Params = @{
     Publisher          = 'Microsoft.Azure.Extensions'
     ExtensionType      = 'CustomScript'
     TypeHandlerVersion = '2.1'
-    Settings          = @{fileUris = @('https://raw.githubusercontent.com/mate-academy/azure_task_13_vm_monitoring/main/install-app.sh'); commandToExecute = 'bash install-app.sh'}
+    Settings           = @{fileUris = @('https://raw.githubusercontent.com/mate-academy/azure_task_13_vm_monitoring/main/install-app.sh'); commandToExecute = 'bash install-app.sh'}
 }
 Set-AzVMExtension @Params
 
 $amaParams = @{
-    ResourceGroupName  = $resourceGroupName
-    VMName             = $vmName
-    Name               = 'AzureMonitorLinuxAgent'
-    Publisher          = 'Microsoft.Azure.Monitor'
-    ExtensionType      = 'AzureMonitorLinuxAgent'
-    TypeHandlerVersion = '1.25'
+    ResourceGroupName      = $resourceGroupName
+    VMName                 = $vmName
+    Name                   = 'AzureMonitorLinuxAgent'
+    Publisher              = 'Microsoft.Azure.Monitor'
+    ExtensionType          = 'AzureMonitorLinuxAgent'
+    TypeHandlerVersion     = '1.25'
     EnableAutomaticUpgrade = $true
 }
 Set-AzVMExtension @amaParams
+
+$dcrJson = @"
+{
+  "location": "$location",
+  "kind": "Linux",
+  "properties": {
+    "dataSources": {
+      "performanceCounters": [
+        {
+          "name": "perfCounterDataSource60",
+          "streams": [
+            "Microsoft-InsightsMetrics"
+          ],
+          "samplingFrequencyInSeconds": 60,
+          "counterSpecifiers": [
+            "Processor(*)\\% Processor Time",
+            "Memory(*)\\% Used Memory",
+            "Memory(*)\\Available MBytes Memory",
+            "LogicalDisk(*)\\% Free Space"
+          ]
+        }
+      ]
+    },
+    "destinations": {
+      "azureMonitorMetrics": {
+        "name": "azureMonitorMetrics-default"
+      }
+    },
+    "dataFlows": [
+      {
+        "streams": [
+          "Microsoft-InsightsMetrics"
+        ],
+        "destinations": [
+          "azureMonitorMetrics-default"
+        ]
+      }
+    ]
+  }
+}
+"@
+
+$dcr = New-AzDataCollectionRule -ResourceGroupName $resourceGroupName -Name $dcrName -JsonString $dcrJson
+$vmResource = Get-AzVm -ResourceGroupName $resourceGroupName -Name $vmName
+New-AzDataCollectionRuleAssociation -TargetResourceId $vmResource.Id -AssociationName "matebox-dcr-assoc" -DataCollectionRuleId $dcr.Id
